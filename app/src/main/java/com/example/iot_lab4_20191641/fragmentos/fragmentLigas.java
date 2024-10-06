@@ -1,16 +1,23 @@
 package com.example.iot_lab4_20191641.fragmentos;
 
+import android.content.Context;
+import android.hardware.Sensor;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.hardware.SensorEvent;
 
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.appcompat.app.AlertDialog;
 
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.Toast;
 
 import com.example.iot_lab4_20191641.R;
@@ -31,7 +38,7 @@ import retrofit2.Response;
  * Use the {@link fragmentLigas#newInstance} factory method to
  * create an instance of this fragment.
  */
-public class fragmentLigas extends Fragment {
+public class fragmentLigas extends Fragment implements SensorEventListener {
 
     // TODO: Rename parameter arguments, choose names that match
     // the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
@@ -75,6 +82,13 @@ public class fragmentLigas extends Fragment {
     private RecyclerView recyclerView;
     private LigaAdapter ligaAdapter;
     private Button btnFetchLigas;
+    private SensorManager sensorManager;
+    private Sensor accelerometer;
+    private boolean isAccelerometerAvailable;
+    private float lastX, lastY, lastZ;
+    private List<Liga> ligaList;
+    private EditText buscarPais;
+
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
@@ -87,18 +101,35 @@ public class fragmentLigas extends Fragment {
         recyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
         btnFetchLigas.setOnClickListener(v -> fetchLigas()); // se le consultó a chatgpt porque tenía errores en mi código anterior y no encontraba la forma de solucionarlo
 
+        sensorManager = (SensorManager) getActivity().getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) {
+            accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            isAccelerometerAvailable = accelerometer != null;
+        } else {
+            isAccelerometerAvailable = false;
+        }
+
         return view;
     }
-
+    //acá le pregunté a chatgpt por qué no mostraba la lista cuando ponía el pais en el editText pero no logró darme una solución
+    //creo que debí hacer otro model y adapter para adaptarlo el json que entrega la consulta de las ligas de un pais.
     private void fetchLigas() {
         ApiRetrofit1 apiService = ApiRetrofit.getRetrofitInstance().create(ApiRetrofit1.class);
-        Call<Ligas> call = apiService.getAllLeagues();
+
+        String pais = buscarPais.getText().toString().trim();
+        Call<Ligas> call;
+
+        if (pais.isEmpty()) {
+            call = apiService.getAllLeagues();
+        } else {
+            call = apiService.getLeaguesByCountry(pais); //como daba error si ponía LigasParticular debido a que falta más implementación lo dejé así.
+        }
 
         call.enqueue(new Callback<Ligas>() {
             @Override
             public void onResponse(Call<Ligas> call, Response<Ligas> response) {
                 if (response.isSuccessful() && response.body() != null && response.body().getLeagues() != null) {
-                    List<Liga> ligaList = response.body().getLeagues();
+                    ligaList = response.body().getLeagues();
 
                     if (ligaList != null && !ligaList.isEmpty()) {
                         ligaAdapter = new LigaAdapter(getContext(), ligaList);
@@ -117,5 +148,40 @@ public class fragmentLigas extends Fragment {
                 Log.e("API Error", t.getMessage());
             }
         });
+    }
+
+    public void onSensorChanged(SensorEvent event) {
+        float x = event.values[0];
+        float y = event.values[1];
+        float z = event.values[2];
+
+        float deltaX = x - lastX;
+        float deltaY = y - lastY;
+        float deltaZ = z - lastZ;
+        lastX = x;
+        lastY = y;
+        lastZ = z;
+
+        float acceleration = (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+
+        if (acceleration > SensorManager.SENSOR_DELAY_GAME) {
+            mostrarDialogConfirmacion();
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int i) {
+    }
+
+    private void mostrarDialogConfirmacion() {
+        new AlertDialog.Builder(getContext())
+                .setTitle("Eliminar últimos resultados")
+                .setPositiveButton("Eliminar", (dialog, which) -> eliminarUltimosResultados())
+                .setNegativeButton("Cancelar", null)
+                .show();
+    }
+
+    private void eliminarUltimosResultados() {
+            ligaAdapter.notifyItemRemoved(ligaList.size());
     }
 }
